@@ -11,12 +11,14 @@
 #define OP_AUIPC   0b0010111
 #define OP_JAL     0b1101111
 #define OP_JALR    0b1100111
-#define OP_BEQ     0b1100011
-#define OP_BNE     0b1100011
-#define OP_BLT     0b1100011
-#define OP_BGE     0b1100011
-#define OP_BLTU    0b1100011
-#define OP_BGEU    0b1100011
+
+#define OP_B_INSTR 0b1100011
+// #define OP_BEQ     0b1100011
+// #define OP_BNE     0b1100011
+// #define OP_BLT     0b1100011
+// #define OP_BGE     0b1100011
+// #define OP_BLTU    0b1100011
+// #define OP_BGEU    0b1100011
 
 #define OP_I_LOAD_INSTR 0b0000011
 // #define OP_LB      0b0000011
@@ -30,7 +32,7 @@
 // #define OP_SH      0b0100011
 // #define OP_SW      0b0100011
 
-#define OP_I_OTHERS_INSTR 0b0010011
+#define OP_I_ARITH_SHIFT_INSTR 0b0010011
 // #define OP_ADDI    0b0010011
 // #define OP_SLTI    0b0010011
 // #define OP_SLTIU   0b0010011

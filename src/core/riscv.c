@@ -38,7 +38,11 @@ void riscv_load_bin(riscv_t *riscv, const char *path) {
         exit(-1);
     }
 
-    while (fread(riscv->flash->mem, 1, 1024, file) > 0) {}
+    size_t total = 0;
+    size_t read_size;
+    while (read_size = fread(riscv->flash->mem + total, 1, 1024, file)) {
+        total += read_size;
+    }
     
     fclose(file);
 }
@@ -68,6 +72,20 @@ static inline int32_t s_get_imm(instr_t *instr) {
     int extend_1 = instr->s.imm_11_5 & (1 << 6);
     riscv_word_t imm = (instr->s.imm_11_5 << 5) | instr->s.imm_4_0;
     return extend_1 ? (imm | 0xFFFFF << 12) : imm;
+}
+
+static inline int32_t j_get_imm(instr_t *instr) {
+    riscv_word_t imm = (instr->j.imm_10_1 << 1) | (instr->j.imm_11 << 11) |
+     (instr->j.imm_19_12 << 12) | (instr->j.imm_20 << 20);
+    
+    return instr->j.imm_20 ? (imm | (0x7FF << 21)) : imm; 
+}
+
+static inline int32_t b_get_imm(instr_t *instr) {
+    int32_t imm = (instr->b.imm_12 << 12) | (instr->b.imm_11 << 11) |
+     (instr->b.imm_10_5 << 5) | (instr->b.imm_4_1 << 1);
+    
+    return instr->b.imm_12 ? (imm | (0x1FFFFFFF << 13)) : imm;
 }
 
 static void execute_ADDI(riscv_t *riscv, instr_t *instr) {
@@ -137,6 +155,7 @@ static void execute_SLTI(riscv_t *riscv, instr_t *instr) {
     riscv_write_reg(riscv, rd, rs1_val < imm); // if rd invalid?
 }
 
+// R[rd] = (R[rs1] <(u) SignExt(imm12))? 1 : 0
 static void execute_SLTIU(riscv_t *riscv, instr_t *instr) {
     riscv_word_t imm = i_get_imm(instr);
     riscv_word_t rd = instr->i.rd;
@@ -205,9 +224,15 @@ static void execute_SRA(riscv_t *riscv, instr_t *instr) {
     riscv_write_reg(riscv, instr->r.rd, rs1_val >> rs2_val); // if rd invalid?
 }
 
+// Load upper immediate; U; lui rd, imm20; R[rd] = SignExt(imm20 << 12)
 static void execute_LUI(riscv_t *riscv, instr_t *instr) {
-    int32_t imm = u_get_imm(instr);
+    riscv_word_t imm = u_get_imm(instr);
     riscv_write_reg(riscv, instr->u.rd, imm); // if rd invalid?
+}
+
+static void execute_AUIPC(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t imm = u_get_imm(instr);
+    riscv_write_reg(riscv, instr->u.rd, imm + riscv->pc); // if rd invalid?
 }
 
 // notice that when doing add, signed or unsigned doesn't matter
@@ -233,6 +258,8 @@ static void execute_SW(riscv_t *riscv, instr_t *instr) {
     riscv_mem_write(riscv, addr, (uint8_t*)&rs2_val, 4);
 }
 
+// load byte, load half word must do sign extension after loading
+// the imm in load/store can be either positive or negative
 static void execute_LB(riscv_t *riscv, instr_t *instr) {
     riscv_word_t rs1_val = riscv_read_reg(riscv, instr->i.rs1);
     riscv_word_t addr = rs1_val + i_get_imm(instr);
@@ -275,6 +302,85 @@ static void execute_LW(riscv_t *riscv, instr_t *instr) {
     riscv_write_reg(riscv, instr->i.rd, word);
 }
 
+static void execute_JAL(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = j_get_imm(instr);
+    riscv_write_reg(riscv, instr->j.rd, riscv->pc + 4);
+    riscv->pc += imm;
+}
+
+static void execute_JALR(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = i_get_imm(instr);
+    int32_t rs1_val = riscv_read_reg(riscv, instr->i.rs1);
+    riscv_write_reg(riscv, instr->i.rd, riscv->pc + 4);
+    riscv->pc = (rs1_val + imm);
+}
+
+static void execute_BEQ(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    riscv_word_t rs1_val = riscv_read_reg(riscv, instr->b.rs1);
+    riscv_word_t rs2_val = riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val == rs2_val) {
+        riscv->pc += imm;
+        return;
+    }
+    riscv->pc += 4;
+}
+
+static void execute_BGE(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    int32_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->b.rs1);
+    int32_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val >= rs2_val) {
+        riscv->pc += imm;
+        return;
+    }   
+    riscv->pc += 4; 
+}
+
+static void execute_BGEU(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    riscv_word_t rs1_val = riscv_read_reg(riscv, instr->b.rs1);
+    riscv_word_t rs2_val = riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val >= rs2_val) {
+        riscv->pc += imm;
+        return;
+    }      
+    riscv->pc += 4; 
+}
+
+static void execute_BLT(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    int32_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->b.rs1);
+    int32_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val < rs2_val) {
+        riscv->pc += imm;
+        return;
+    }   
+    riscv->pc += 4;
+}
+
+static void execute_BLTU(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    riscv_word_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->b.rs1);
+    riscv_word_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val < rs2_val) {
+        riscv->pc += imm;
+        return;
+    }       
+    riscv->pc += 4;  
+}
+
+static void execute_BNE(riscv_t *riscv, instr_t *instr) {
+    int32_t imm = b_get_imm(instr);
+    riscv_word_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->b.rs1);
+    riscv_word_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->b.rs2);
+    if (rs1_val != rs2_val) {
+        riscv->pc += imm;
+        return;
+    }
+    riscv->pc += 4;         
+}
+
 static void exec_i_load_instrs(riscv_t *riscv, instr_t *instr) {
     riscv_word_t funct3 = instr->i.funct3;
     switch (funct3) {
@@ -303,7 +409,7 @@ static void exec_i_load_instrs(riscv_t *riscv, instr_t *instr) {
     }
 }
 
-static void exec_i_others_instrs(riscv_t *riscv, instr_t *instr) {
+static void exec_i_arith_shift_instrs(riscv_t *riscv, instr_t *instr) {
     riscv_word_t funct3 = instr->i.funct3;
     riscv_word_t imm7_0 = instr->i.imm_11_0 >> 5; 
 
@@ -455,10 +561,36 @@ static void execute_s_instrs(riscv_t *riscv, instr_t *instr) {
     }
 }
 
+static void execute_b_instrs(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t funct3 = instr->b.funct3;
+    switch (funct3) {
+    case FUNCT3_BEQ:
+        execute_BEQ(riscv, &riscv->instr);
+        break;
+    case FUNCT3_BGE:
+        execute_BGE(riscv, &riscv->instr);
+        break;
+    case FUNCT3_BGEU:
+        execute_BGEU(riscv, &riscv->instr);
+        break;
+    case FUNCT3_BLT:
+        execute_BLT(riscv, &riscv->instr);
+        break;
+    case FUNCT3_BLTU:
+        execute_BLTU(riscv, &riscv->instr);
+        break;
+    case FUNCT3_BNE:
+        execute_BNE(riscv, &riscv->instr);
+        break;
+    default:
+        break;
+    }
+}
+
 void riscv_continue(riscv_t *riscv, int forever) {
 }
 
-void fetch_and_execute(riscv_t *riscv, int forever) {
+void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
     device_t *flash_dev = &riscv->flash->device;
     if (riscv->pc < flash_dev->base || riscv->pc >= flash_dev->end) { // end is not valid address
         fprintf(stderr, "pc out of flash bound\n");
@@ -481,8 +613,20 @@ void fetch_and_execute(riscv_t *riscv, int forever) {
                 execute_LUI(riscv, &riscv->instr);
                 riscv->pc += sizeof(riscv_word_t);
                 break;
-            case OP_I_OTHERS_INSTR:
-                exec_i_others_instrs(riscv, &riscv->instr);
+            case OP_AUIPC:
+                execute_AUIPC(riscv, &riscv->instr);
+                riscv->pc += sizeof(riscv_word_t);
+                break;
+            case OP_JAL:
+                execute_JAL(riscv, &riscv->instr);
+                // riscv->pc += sizeof(riscv_word_t); // no need to add four for jal
+                break;
+            case OP_JALR:
+                execute_JALR(riscv, &riscv->instr);
+                // riscv->pc += sizeof(riscv_word_t); // no need to add four for jalr
+                break;
+            case OP_I_ARITH_SHIFT_INSTR:
+                exec_i_arith_shift_instrs(riscv, &riscv->instr);
                 break;
             case OP_I_LOAD_INSTR:
                 exec_i_load_instrs(riscv, &riscv->instr);
@@ -492,6 +636,9 @@ void fetch_and_execute(riscv_t *riscv, int forever) {
                 break;
             case OP_S_INSTR:
                 execute_s_instrs(riscv, &riscv->instr);
+                break;
+            case OP_B_INSTR:
+                execute_b_instrs(riscv, &riscv->instr);
                 break;
             default:
                 goto exception;

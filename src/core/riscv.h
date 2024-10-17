@@ -24,7 +24,7 @@ riscv_t *riscv_create(void);
 void riscv_set_flash(riscv_t *riscv, mem_t *flash);
 void riscv_load_bin(riscv_t *riscv, const char *path);
 void riscv_continue(riscv_t *riscv, int forever);
-void fetch_and_execute(riscv_t *riscv, int forever);
+void riscv_fetch_and_execute(riscv_t *riscv, int forever);
 void riscv_reset(riscv_t *riscv);
 int riscv_mem_read(riscv_t *riscv, riscv_word_t addr, uint8_t *val, int width);
 int riscv_mem_write(riscv_t *riscv, riscv_word_t addr, uint8_t *val, int width);
