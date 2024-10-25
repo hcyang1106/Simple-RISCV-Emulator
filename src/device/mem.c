@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 mem_t *mem_create(const char *name, riscv_word_t attr, riscv_word_t base, riscv_word_t size) {
     mem_t *mem = calloc(1, sizeof(mem_t));
@@ -41,9 +42,9 @@ int mem_read(device_t *device, riscv_word_t addr, uint8_t *data, int size) {
     } else if (size == 4) {
         memcpy(data, mem->mem + offset, 4);
     } else {
-        // generate exception?
+        memcpy(data, mem->mem + offset, size);
     }
-
+ 
     return 0;
 }
 
@@ -64,7 +65,7 @@ int mem_write(device_t *device, riscv_word_t addr, uint8_t *data, int size) {
     } else if (size == 4) {
         memcpy(mem->mem + offset, data, 4);
     } else {
-        // generate exception?
+        memcpy(mem->mem + offset, data, size);
     }
 
     return 0;
