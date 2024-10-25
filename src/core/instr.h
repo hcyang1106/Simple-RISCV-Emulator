@@ -6,7 +6,7 @@
 
 #define EBREAK 0b00000000000100000000000001110011
 
-#define OP_EBREAK   0b1110011
+#define OP_EBREAK_CSR 0b1110011
 #define OP_LUI     0b0110111
 #define OP_AUIPC   0b0010111
 #define OP_JAL     0b1101111
@@ -54,18 +54,34 @@
 // #define OP_SRA     0b0110011
 // #define OP_OR      0b0110011
 // #define OP_AND     0b0110011
+// #define OP_MUL
+// #define OP_MULH
+// #define OP_MULHSU
+// #define OP_MULHU
+// #define OP_DIV
+// #define OP_DIVU
+// #define OP_REM
+// #define OP_REMU
 
 #define OP_NOP     0b0010011
 #define OP_CSR     0b1110011
 
+#define FUNCT3_EBREAK 0b000
+
 #define FUNCT3_ADDI      0b000
+#define FUNCT3_CSRRW     0b001
+#define FUNCT3_SLLI      0b001
+#define FUNCT3_CSRRS     0b010 // set bit
 #define FUNCT3_SLTI      0b010
+#define FUNCT3_CSRRC     0b011 // clear bit
 #define FUNCT3_SLTIU     0b011
 #define FUNCT3_XORI      0b100
-#define FUNCT3_ORI       0b110
-#define FUNCT3_ANDI      0b111
-#define FUNCT3_SLLI      0b001
 #define FUNCT3_SRLI_SRAI 0b101
+#define FUNCT3_CSRRWI    0b101
+#define FUNCT3_CSRRSI    0b110
+#define FUNCT3_ORI       0b110
+#define FUNCT3_CSRRCI    0b111
+#define FUNCT3_ANDI      0b111
 
 #define FUNCT3_SB        0b000
 #define FUNCT3_SH        0b001
@@ -77,18 +93,18 @@
 #define FUNCT3_LBU       0b100
 #define FUNCT3_LHU       0b101
 
-#define FUNCT3_ADD_SUB   0b000
+#define FUNCT3_ADD_SUB_MUL 0b000
 // #define FUNCT3_ADD       0b000
 // #define FUNCT3_SUB       0b000
-#define FUNCT3_SLL       0b001
-#define FUNCT3_SLT       0b010
-#define FUNCT3_SLTU      0b011
-#define FUNCT3_XOR       0b100
-#define FUNCT3_SRL_SRA   0b101
+#define FUNCT3_SLL_MULH   0b001
+#define FUNCT3_SLT_MULHSU 0b010
+#define FUNCT3_SLTU_MULU  0b011
+#define FUNCT3_XOR_DIV    0b100
+#define FUNCT3_SRL_SRA_DIVU 0b101
 // #define FUNCT3_SRL       0b101
 // #define FUNCT3_SRA       0b101
-#define FUNCT3_OR        0b110
-#define FUNCT3_AND       0b111
+#define FUNCT3_OR_REM    0b110
+#define FUNCT3_AND_REMU  0b111
 
 #define FUNCT3_BEQ       0b000
 #define FUNCT3_BNE       0b001
@@ -97,22 +113,29 @@
 #define FUNCT3_BLTU      0b110
 #define FUNCT3_BGEU      0b111
 
-#define FUNCT3_MUL       0b000
-#define FUNCT3_MULH      0b001
-#define FUNCT3_MULHSU    0b010
-#define FUNCT3_MULHU     0b011
 #define FUNCT3_DIV       0b100
 #define FUNCT3_DIVU      0b101
 #define FUNCT3_REM       0b110
 #define FUNCT3_REMU      0b111
 
 #define FUNCT7_ADD       0b0000000
+#define FUNCT7_OR        0b0000000
+#define FUNCT7_AND       0b0000000
+#define FUNCT7_SLL       0b0000000
+#define FUNCT7_SLT       0b0000000
+#define FUNCT7_SLTU      0b0000000
+#define FUNCT7_XOR       0b0000000
 #define FUNCT7_SUB       0b0100000
 #define FUNCT7_SRL       0b0000000
 #define FUNCT7_SRA       0b0100000
-#define FUNCT7_DIV       0b0000001
 #define FUNCT7_MUL       0b0000001
+#define FUNCT7_MULH      0b0000001
+#define FUNCT7_MULHSU    0b0000001
+#define FUNCT7_MULHU     0b0000001
+#define FUNCT7_DIV       0b0000001
+#define FUNCT7_DIVU      0b0000001
 #define FUNCT7_REM       0b0000001
+#define FUNCT7_REMU      0b0000001
 #define FUNCT7_MRET      0b0011000
 
 #define IMM7_SRLI 0b0000000
