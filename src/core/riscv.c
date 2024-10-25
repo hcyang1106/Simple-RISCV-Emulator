@@ -6,6 +6,7 @@
 #include "core/instr.h"
 #include "device/device.h"
 
+// create uninitialized riscv
 riscv_t *riscv_create(void) {
     riscv_t *riscv = calloc(1, sizeof(riscv_t));
     if (!riscv) {
@@ -14,6 +15,10 @@ riscv_t *riscv_create(void) {
     }
 
     return riscv;
+}
+
+void riscv_csr_init(riscv_t *riscv) {
+
 }
 
 void riscv_add_device(riscv_t *riscv, device_t *device) {
@@ -52,6 +57,7 @@ void riscv_reset(riscv_t *riscv) {
     riscv->instr.raw = 0;
     riscv->dev_read = riscv->dev_write = (device_t *)0;
     memset(riscv->regs, 0, sizeof(riscv->regs));
+    riscv_csr_init(riscv);
 }
 
 static void execute_EBREAK(riscv_t *riscv, instr_t *instr) {
@@ -174,6 +180,56 @@ static void execute_SUB(riscv_t *riscv, instr_t *instr) {
     int32_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
     int32_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
     riscv_write_reg(riscv, instr->r.rd, rs1_val - rs2_val); // if rd invalid?
+}
+
+// keep the least significant 32 bits
+static void execute_MUL(riscv_t *riscv, instr_t *instr) {
+    int64_t rs1_val = (int64_t)riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    int64_t rs2_val = (int64_t)riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, (riscv_word_t)(rs1_val * rs2_val)); // if rd invalid?
+}
+
+// keep the most significant 32 bits
+static void execute_MULH(riscv_t *riscv, instr_t *instr) {
+    int64_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    int64_t rs2_val = (int32_t)riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, (riscv_word_t)((rs1_val * rs2_val) >> 32)); // if rd invalid?
+}
+
+static void execute_MULHSU(riscv_t *riscv, instr_t *instr) {
+    int64_t rs1_val = (int32_t)riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    uint64_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, (riscv_word_t)((rs1_val * rs2_val) >> 32)); // if rd invalid?
+}
+
+static void execute_MULHU(riscv_t *riscv, instr_t *instr) {
+    uint64_t rs1_val = riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    uint64_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, (riscv_word_t)((rs1_val * rs2_val) >> 32)); // if rd invalid?
+}
+
+static void execute_DIV(riscv_t *riscv, instr_t *instr) {
+    int32_t rs1_val = riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    int32_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, rs1_val / rs2_val); // if rd invalid?
+}
+
+static void execute_DIVU(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t rs1_val = riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    riscv_word_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, rs1_val / rs2_val); // if rd invalid?
+}
+
+static void execute_REM(riscv_t *riscv, instr_t *instr) {
+    int32_t rs1_val = riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    int32_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, rs1_val % rs2_val); // if rd invalid?
+}
+
+static void execute_REMU(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t rs1_val = riscv_read_reg(riscv, instr->r.rs1); // if rs1 invalid?
+    riscv_word_t rs2_val = riscv_read_reg(riscv, instr->r.rs2); // if rs2 invalid?
+    riscv_write_reg(riscv, instr->r.rd, rs1_val % rs2_val); // if rd invalid?
 }
 
 static void execute_OR(riscv_t *riscv, instr_t *instr) {
@@ -381,6 +437,56 @@ static void execute_BNE(riscv_t *riscv, instr_t *instr) {
     riscv->pc += 4;         
 }
 
+static void execute_CSRRW(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t new_csr = riscv_read_reg(riscv, instr->i.rs1);
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
+static void execute_CSRRS(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t new_csr = old_csr | riscv_read_reg(riscv, instr->i.rs1);
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
+static void execute_CSRRC(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t new_csr = old_csr & (~riscv_read_reg(riscv, instr->i.rs1));
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
+static void execute_CSRRWI(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t uimm = instr->i.rs1;
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, uimm); 
+}
+
+static void execute_CSRRSI(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t uimm = instr->i.rs1;
+    riscv_word_t new_csr = old_csr | uimm;
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
+static void execute_CSRRCI(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t csr_addr = i_get_imm(instr);
+    riscv_word_t old_csr = riscv_read_csr(riscv, csr_addr);
+    riscv_word_t uimm = instr->i.rs1;
+    riscv_word_t new_csr = old_csr & ~uimm;
+    riscv_write_reg(riscv, instr->i.rd, old_csr);
+    riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
 static void exec_i_load_instrs(riscv_t *riscv, instr_t *instr) {
     riscv_word_t funct3 = instr->i.funct3;
     switch (funct3) {
@@ -475,15 +581,19 @@ static void exec_r_instrs(riscv_t *riscv, instr_t *instr) {
 
     switch (funct3)
     {
-    case FUNCT3_ADD_SUB:
+    case FUNCT3_ADD_SUB_MUL:
         switch (funct7)
         {
         case FUNCT7_ADD:
-            execute_ADD(riscv, &riscv->instr);
+            execute_ADD(riscv, instr);
             riscv->pc += sizeof(riscv_word_t);
             break;
         case FUNCT7_SUB:
-            execute_SUB(riscv, &riscv->instr);
+            execute_SUB(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_MUL:
+            execute_MUL(riscv, instr);
             riscv->pc += sizeof(riscv_word_t);
             break;
         default:
@@ -491,31 +601,91 @@ static void exec_r_instrs(riscv_t *riscv, instr_t *instr) {
             break;
         }
         break;
-    case FUNCT3_OR:
-        execute_OR(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_OR_REM:
+        switch (funct7) {
+        case FUNCT7_OR:
+            execute_OR(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_REM:
+            execute_REM(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_AND:
-        execute_AND(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_AND_REMU:
+        switch (funct7) {
+        case FUNCT7_AND:
+            execute_AND(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_REMU:
+            execute_REMU(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_SLL:
-        execute_SLL(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_SLL_MULH:
+        switch (funct7) {
+        case FUNCT7_SLL:
+            execute_SLL(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_MULH:
+            execute_MULH(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_SLT:
-        execute_SLT(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_SLT_MULHSU:
+        switch (funct7) {
+        case FUNCT7_SLT:
+            execute_SLT(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_MULHSU:
+            execute_MULHSU(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_SLTU:
-        execute_SLTU(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_SLTU_MULU:
+        switch (funct7) {
+        case FUNCT7_SLTU:
+            execute_SLTU(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_MULHU:
+            execute_MULHU(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_XOR:
-        execute_XOR(riscv, &riscv->instr);
-        riscv->pc += sizeof(riscv_word_t);
+    case FUNCT3_XOR_DIV:
+        switch (funct7) {
+        case FUNCT7_XOR:
+            execute_XOR(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_DIV:
+            execute_DIV(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        default:
+            break;
+        }
         break;
-    case FUNCT3_SRL_SRA:
+    case FUNCT3_SRL_SRA_DIVU:
         switch (funct7) 
         {
         case FUNCT7_SRL:
@@ -524,6 +694,10 @@ static void exec_r_instrs(riscv_t *riscv, instr_t *instr) {
             break;
         case FUNCT7_SRA:
             execute_SRA(riscv, instr);
+            riscv->pc += sizeof(riscv_word_t);
+            break;
+        case FUNCT7_DIVU:
+            execute_DIVU(riscv, instr);
             riscv->pc += sizeof(riscv_word_t);
             break;
         default:
@@ -541,19 +715,19 @@ static void exec_r_instrs(riscv_t *riscv, instr_t *instr) {
     return;
 }
 
-static void execute_s_instrs(riscv_t *riscv, instr_t *instr) {
+static void exec_s_instrs(riscv_t *riscv, instr_t *instr) {
     riscv_word_t funct3 = instr->s.funct3;
     switch (funct3) {
     case FUNCT3_SB:
-        execute_SB(riscv, &riscv->instr);
+        execute_SB(riscv, instr);
         riscv->pc += sizeof(riscv_word_t);
         break;
     case FUNCT3_SH:
-        execute_SH(riscv, &riscv->instr);
+        execute_SH(riscv, instr);
         riscv->pc += sizeof(riscv_word_t);
         break;
     case FUNCT3_SW:
-        execute_SW(riscv, &riscv->instr);
+        execute_SW(riscv, instr);
         riscv->pc += sizeof(riscv_word_t);
         break;
     default:
@@ -561,33 +735,64 @@ static void execute_s_instrs(riscv_t *riscv, instr_t *instr) {
     }
 }
 
-static void execute_b_instrs(riscv_t *riscv, instr_t *instr) {
+static void exec_b_instrs(riscv_t *riscv, instr_t *instr) {
     riscv_word_t funct3 = instr->b.funct3;
     switch (funct3) {
     case FUNCT3_BEQ:
-        execute_BEQ(riscv, &riscv->instr);
+        execute_BEQ(riscv, instr);
         break;
     case FUNCT3_BGE:
-        execute_BGE(riscv, &riscv->instr);
+        execute_BGE(riscv, instr);
         break;
     case FUNCT3_BGEU:
-        execute_BGEU(riscv, &riscv->instr);
+        execute_BGEU(riscv, instr);
         break;
     case FUNCT3_BLT:
-        execute_BLT(riscv, &riscv->instr);
+        execute_BLT(riscv, instr);
         break;
     case FUNCT3_BLTU:
-        execute_BLTU(riscv, &riscv->instr);
+        execute_BLTU(riscv, instr);
         break;
     case FUNCT3_BNE:
-        execute_BNE(riscv, &riscv->instr);
+        execute_BNE(riscv, instr);
         break;
     default:
         break;
     }
 }
 
-void riscv_continue(riscv_t *riscv, int forever) {
+static void exec_special_instrs(riscv_t *riscv, instr_t *instr) {
+    riscv_word_t funct3 = instr->b.funct3;
+    switch (funct3) {
+    case FUNCT3_EBREAK: // do nothing
+        break;
+    case FUNCT3_CSRRW:
+        execute_CSRRW(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    case FUNCT3_CSRRS:
+        execute_CSRRS(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    case FUNCT3_CSRRC:
+        execute_CSRRC(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    case FUNCT3_CSRRWI:
+        execute_CSRRWI(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    case FUNCT3_CSRRSI:
+        execute_CSRRSI(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    case FUNCT3_CSRRCI:
+        execute_CSRRCI(riscv, instr);
+        riscv->pc += sizeof(riscv_word_t);
+        break;
+    default:
+        break;
+    }
 }
 
 void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
@@ -602,12 +807,29 @@ void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
             goto exception;
         }
 
+        if (forever) {
+            int detect = riscv_detect_breakpoint(riscv, riscv->pc);
+            if (detect) {
+                break;
+            }
+
+            // note that recv is a blocking function
+            char ch = EOF;
+            recv(riscv->gdb_server->client, &ch, 1, 0);
+            if (ch == GDB_PAUSE) {
+                break;
+            }
+        }
+        
         riscv_word_t *mem = (riscv_word_t *)riscv->flash->mem;
         riscv->instr.raw = mem[(riscv->pc - flash_dev->base) >> 2];
 
         switch(riscv->instr.opcode) {
-            case OP_EBREAK:
-                execute_EBREAK(riscv, &riscv->instr);
+            case OP_EBREAK_CSR:
+                exec_special_instrs(riscv, &riscv->instr);
+                if (riscv->instr.raw == EBREAK) {
+                    goto ebreak;
+                }
                 break;
             case OP_LUI:
                 execute_LUI(riscv, &riscv->instr);
@@ -635,20 +857,21 @@ void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
                 exec_r_instrs(riscv, &riscv->instr);
                 break;
             case OP_S_INSTR:
-                execute_s_instrs(riscv, &riscv->instr);
+                exec_s_instrs(riscv, &riscv->instr);
                 break;
             case OP_B_INSTR:
-                execute_b_instrs(riscv, &riscv->instr);
+                exec_b_instrs(riscv, &riscv->instr);
                 break;
             default:
                 goto exception;
                 break;
         }
     } while (forever);
-
+    
+ebreak:
     return;
 
-    exception: // exception happens
+exception: // exception happens
     return;
 }
 
@@ -696,4 +919,63 @@ int riscv_mem_write(riscv_t *riscv, riscv_word_t addr, uint8_t *val, int width) 
 
     riscv->dev_write = device;
     return device->write(device, addr, val, width);
+}
+
+riscv_word_t riscv_read_csr(riscv_t *riscv, riscv_word_t addr) {
+    return riscv->csr_regs.mscratch;
+}
+
+void riscv_write_csr(riscv_t *riscv, riscv_word_t addr, riscv_word_t val) {
+    riscv->csr_regs.mscratch = val;
+}
+
+void riscv_run(riscv_t *riscv) {
+    riscv_reset(riscv);
+
+    if (riscv->gdb_server) {
+        gdb_server_run(riscv->gdb_server);
+        return;
+    }
+    riscv_fetch_and_execute(riscv, 1);
+}
+
+void riscv_add_breakpoint(riscv_t *riscv, riscv_word_t addr) {
+    breakpoint_t *new = calloc(1, sizeof(breakpoint_t));
+    new->addr = addr;
+    new->next = riscv->bp_list;
+    riscv->bp_list = new;
+}
+
+int riscv_remove_breakpoint(riscv_t *riscv, riscv_word_t addr) {
+    breakpoint_t *pre = NULL;
+    breakpoint_t *curr = riscv->bp_list;
+    int remove = 0;
+    while (curr) {
+        if (curr->addr == addr) {
+            remove = 1;
+            if (pre) {
+                pre->next = curr->next;
+            } else {
+                riscv->bp_list = curr->next;
+            }
+            break;
+        }
+
+        pre = curr;
+        curr = curr->next;
+    }
+
+    return remove;
+}
+
+int riscv_detect_breakpoint(riscv_t *riscv, riscv_word_t addr) {
+    breakpoint_t *curr = riscv->bp_list;
+    while (curr) {
+        if (curr->addr == addr) {
+            return 1;
+        }
+        curr = curr->next;
+    }
+
+    return 0;
 }
