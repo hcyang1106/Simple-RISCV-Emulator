@@ -3,7 +3,10 @@
 #include "core/riscv.h"
 #include "device/mem.h"
 #include "test/instr_test.h"
-// #include "test.h"       
+#include "device/usart.h"
+#include "device/pfic.h"
+#include "device/systick.h"
+#include "device/lcd.h"
 
 #define RISCV_FLASH_BASE 0
 #define RISCV_FLASH_SIZE (16 * 1024 * 1024)
@@ -20,7 +23,8 @@ static void print_usage(const char *filename) {
                     "-d | print gdb trace\n"
                     "-g [option] | enable gdb server"
                     "-r addr:size | set ram range\n"
-                    "-f addr:size | set flash range\n", filename
+                    "-f addr:size | set flash range\n"
+                    "-l | enable lcd\n", filename
     );
 }
 
@@ -43,7 +47,7 @@ int main(int argc, char** argv) {
 
     riscv_t *riscv = riscv_create();
 
-    const char *opts[] = {"-h", "-t", "-g", "-r", "-f", "-d"};
+    const char *opts[] = {"-h", "-t", "-g", "-r", "-f", "-d", "-l"};
     
     int has_ram = 0;
     int has_flash = 0;
@@ -51,6 +55,7 @@ int main(int argc, char** argv) {
     int is_debug = 0;
     int has_gdb_server = 0;
     int gdb_server_port = GDB_SERVER_DEFAULT_PORT;
+    const char *elf_file = NULL;
 
     int i = 1;
     while (i < argc) {
@@ -143,6 +148,12 @@ int main(int argc, char** argv) {
                 }
                 i++;
             }
+        } else if (strncmp(argv[i], "-l", 2) == 0) {
+            device_t *lcd = lcd_create("lcd", 800, 600);
+            riscv_add_device(riscv, lcd);
+        } else if (strncmp(&argv[i][strlen(argv[i])-4], ".elf", 3) == 0) {
+            elf_file = argv[i];
+            // riscv_load_elf(riscv, argv[i]);
         } else {
             fprintf(stderr, "Unsupported option %s\n", argv[i]);
             exit(0);
@@ -150,6 +161,16 @@ int main(int argc, char** argv) {
 
         i++;
     }
+
+    device_t *usart = usart_create("usart", USART1_BASE);
+    riscv_add_device(riscv, usart);
+
+    device_t *pfic = pfic_create("pfic", PFIC_BASE);
+    riscv_add_device(riscv, pfic);
+    riscv_set_pfic(riscv, (pfic_t*)pfic);
+
+    device_t *systick = systick_create("systick", SYSTICK_BASE);
+    riscv_add_device(riscv, systick);
 
     if (!has_ram) {
         mem_t *ram = mem_create("ram", MEM_ATTR_READABLE | MEM_ATTR_WRITABLE, RISCV_RAM_BASE, RISCV_RAM_SIZE);
@@ -175,7 +196,11 @@ int main(int argc, char** argv) {
         }
         fprintf(stdout, "gdb server is running on port %d\n", gdb_server_port);
     }
-    
+
+    if (elf_file) {
+        riscv_load_elf(riscv, elf_file);
+    }
+
     riscv_run(riscv);
 
     return 0;
