@@ -11,7 +11,7 @@
         goto err; \
     }
 
-#define GDB_PACKET_SIZE (30 * 1024)
+#define GDB_PACKET_SIZE (256 * 1024)
 #define GDB_CHECKSUM_SIZE (2)
 #define GDB_ERROR_CODE (1)
 #define GDB_PAUSE (3)

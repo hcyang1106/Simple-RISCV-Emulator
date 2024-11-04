@@ -62,6 +62,8 @@ static int buf2num(const char *buf) {
     return ret;
 }
 
+// return the start of the message part
+// validate using checksum
 char *gdb_read_packet(gdb_server_t *server) {
     enum {
         INVALID,
@@ -144,6 +146,8 @@ err:
     return NULL;
 }
 
+// pass in the msg and add checksum to form a packet
+// send the packet
 static int gdb_write_packet(gdb_server_t *server, const char *data) {
     char packet_buf[GDB_PACKET_SIZE];
     int idx = 0;
@@ -325,11 +329,11 @@ static int gdb_handle_step(gdb_server_t *server, char *none) {
 }
 
 static int gdb_handle_continue(gdb_server_t *server, char *none) {
-    unsigned long unblock_recv = 1;
-    ioctlsocket(server->client, FIONBIO, (unsigned long *)&unblock_recv);
+    // unsigned long unblock_recv = 1;
+    // ioctlsocket(server->client, FIONBIO, (unsigned long *)&unblock_recv);
     riscv_fetch_and_execute(server->riscv, 1);
-    unblock_recv = 0;
-    ioctlsocket(server->client, FIONBIO, (unsigned long *)&unblock_recv);
+    // unblock_recv = 0;
+    // ioctlsocket(server->client, FIONBIO, (unsigned long *)&unblock_recv);
     return gdb_write_stop(server); // should not be something else
 }
 
@@ -416,8 +420,8 @@ static void gdb_close_connect(gdb_server_t *server) {
 
 void gdb_server_run(gdb_server_t *server) {
     while (1) {
-        gdb_wait_client(server);
-        gdb_handle_request(server);
-        gdb_close_connect(server);
+        gdb_wait_client(server); // accept connection and create client socket
+        gdb_handle_request(server); // calls gdb_read_packet, analyze the msg and calls gdb_write_packet
+        gdb_close_connect(server); // close client socket
     }
 }
