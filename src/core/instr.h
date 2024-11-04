@@ -66,7 +66,7 @@
 #define OP_NOP     0b0010011
 #define OP_CSR     0b1110011
 
-#define FUNCT3_EBREAK 0b000
+#define FUNCT3_EBREAK_MRET 0b000
 
 #define FUNCT3_ADDI      0b000
 #define FUNCT3_CSRRW     0b001
@@ -136,6 +136,7 @@
 #define FUNCT7_DIVU      0b0000001
 #define FUNCT7_REM       0b0000001
 #define FUNCT7_REMU      0b0000001
+#define FUNCT7_EBREAK    0b0000000
 #define FUNCT7_MRET      0b0011000
 
 #define IMM7_SRLI 0b0000000
