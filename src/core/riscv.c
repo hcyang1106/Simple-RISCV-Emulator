@@ -5,6 +5,62 @@
 #include <string.h>
 #include "core/instr.h"
 #include "device/device.h"
+#include <plat/plat.h>
+
+void riscv_csr_init (riscv_t *riscv) {
+    // the regs here actually unused
+    // model version
+    riscv->csr_regs.marchid = 0xDC68D886;
+    riscv->csr_regs.mimpid = 0xdc688001;
+}
+
+riscv_word_t riscv_read_csr (riscv_t * riscv, riscv_word_t csr) {
+    switch (csr) {
+        case CSR_MARCHID:
+            return riscv->csr_regs.marchid;
+        case CSR_MPIDID:
+            return riscv->csr_regs.mimpid;
+        case CSR_MSTATUS:
+            return riscv->csr_regs.mstatus;
+        case CSR_MTVEC:
+            return riscv->csr_regs.mtvec;
+        case CSR_MSCRATCH:
+            return riscv->csr_regs.mscratch;
+        case CSR_MEPC:
+            return riscv->csr_regs.mepc;
+        case CSR_MCAUSE:
+            return riscv->csr_regs.mcause;
+        case CSR_MTVAL:
+            return riscv->csr_regs.mtval;
+        default:
+            return 0;            
+    }
+}
+
+void riscv_write_csr (riscv_t * riscv, riscv_word_t csr, riscv_word_t val) {
+    switch (csr) {
+        case CSR_MSTATUS:
+             riscv->csr_regs.mstatus = val;
+             break;
+        case CSR_MTVEC:
+            riscv->csr_regs.mtvec = val;
+            break;
+        case CSR_MSCRATCH:
+            riscv->csr_regs.mscratch = val;
+            break;
+        case CSR_MEPC:
+            riscv->csr_regs.mepc = val;
+            break;
+        case CSR_MCAUSE:
+            riscv->csr_regs.mcause = val;
+            break;
+        case CSR_MTVAL:
+            riscv->csr_regs.mtval = val;
+            break;
+        default:
+            break;           
+    }    
+}
 
 // create uninitialized riscv
 riscv_t *riscv_create(void) {
@@ -17,17 +73,18 @@ riscv_t *riscv_create(void) {
     return riscv;
 }
 
-void riscv_csr_init(riscv_t *riscv) {
-
-}
-
 void riscv_add_device(riscv_t *riscv, device_t *device) {
     device->next = riscv->device_list;
     riscv->device_list = device;
+    device->riscv = riscv;
 }
 
 void riscv_set_flash(riscv_t *riscv, mem_t *flash) {
     riscv->flash = flash;
+}
+
+void riscv_set_pfic(riscv_t *riscv, pfic_t *pfic) {
+    riscv->pfic = pfic;
 }
 
 void riscv_load_bin(riscv_t *riscv, const char *path) {
@@ -50,6 +107,46 @@ void riscv_load_bin(riscv_t *riscv, const char *path) {
     }
     
     fclose(file);
+}
+
+void riscv_load_elf(riscv_t *riscv, const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (!file) {
+        fprintf(stderr, "open file %s failed\n", path);
+        exit(-1);
+    }
+
+    Elf32_Ehdr elf_hdr;
+    size_t hdr_read = fread(&elf_hdr, 1, sizeof(Elf32_Ehdr), file);
+    if (hdr_read < sizeof(Elf32_Ehdr)) {
+        fprintf(stderr, "read elf file %s header failed\n", path);
+        exit(-1);
+    }
+
+    for (int i = 0; i < elf_hdr.e_phnum; i++) {
+        fseek(file, elf_hdr.e_phoff + sizeof(Elf32_Phdr) * i, SEEK_SET);
+        Elf32_Phdr elf_phdr;
+        size_t phdr_read = fread(&elf_phdr, 1, sizeof(Elf32_Phdr), file);
+        if (phdr_read < sizeof(Elf32_Phdr)) {
+            fprintf(stderr, "read elf file %s phdr failed\n", path);
+            exit(-1);
+        }
+
+        if (elf_phdr.p_type != PT_LOAD) {
+            continue;
+        }
+
+        int sec_size = elf_phdr.p_filesz;
+        char *buf = calloc(1, sec_size);
+        fseek(file, elf_phdr.p_offset, SEEK_SET);
+        size_t sec_read = fread(buf, 1, sec_size, file);
+        if (sec_read < sec_size) {
+            fprintf(stderr, "read elf file %s sections failed\n", path);
+            exit(-1);
+        }
+        riscv_mem_write(riscv, elf_phdr.p_paddr, buf, sec_size);
+        free(buf);
+    }
 }
 
 void riscv_reset(riscv_t *riscv) {
@@ -319,7 +416,7 @@ static void execute_SW(riscv_t *riscv, instr_t *instr) {
 static void execute_LB(riscv_t *riscv, instr_t *instr) {
     riscv_word_t rs1_val = riscv_read_reg(riscv, instr->i.rs1);
     riscv_word_t addr = rs1_val + i_get_imm(instr);
-    riscv_word_t byte;
+    riscv_word_t byte = 0; // important to reset to zero
     riscv_mem_read(riscv, addr, (uint8_t*)&byte, 1);
     byte = byte & (1 << 7) ? (byte | (0xFFFFFF << 8)) : byte;
     riscv_write_reg(riscv, instr->i.rd, byte);
@@ -485,6 +582,10 @@ static void execute_CSRRCI(riscv_t *riscv, instr_t *instr) {
     riscv_word_t new_csr = old_csr & ~uimm;
     riscv_write_reg(riscv, instr->i.rd, old_csr);
     riscv_write_csr(riscv, csr_addr, new_csr); 
+}
+
+static void execute_MRET(riscv_t *riscv, instr_t *instr) {
+    riscv_exit_irq(riscv);
 }
 
 static void exec_i_load_instrs(riscv_t *riscv, instr_t *instr) {
@@ -762,9 +863,19 @@ static void exec_b_instrs(riscv_t *riscv, instr_t *instr) {
 }
 
 static void exec_special_instrs(riscv_t *riscv, instr_t *instr) {
-    riscv_word_t funct3 = instr->b.funct3;
+    riscv_word_t funct3 = instr->r.funct3;
+    riscv_word_t funct7 = instr->r.funct7;
     switch (funct3) {
-    case FUNCT3_EBREAK: // do nothing
+    case FUNCT3_EBREAK_MRET:
+        switch (funct7) {
+            case FUNCT7_EBREAK:
+                break;
+            case FUNCT7_MRET:
+                execute_MRET(riscv, instr);
+                break;
+            default:
+                break;
+        }
         break;
     case FUNCT3_CSRRW:
         execute_CSRRW(riscv, instr);
@@ -795,6 +906,29 @@ static void exec_special_instrs(riscv_t *riscv, instr_t *instr) {
     }
 }
 
+int gdb_stop = 0;
+int thread_stop = 0;
+
+// thread should not exit after riscv_fetch_and_execute has finished
+static void handle_gdb_stop_thread(void *arg) {
+    gdb_server_t *server = (gdb_server_t *)arg;
+
+    int timeout = 500;
+    setsockopt(server->client, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+    
+    char ch = EOF;
+    while (!thread_stop) {
+        recv(server->client, &ch, 1, 0);
+        if (ch == GDB_PAUSE) {
+            gdb_stop = 1;
+            break;
+        }
+    }
+
+    timeout = 0;
+    setsockopt(server->client, SOL_SOCKET, SO_RCVTIMEO, (char *)&timeout, sizeof(timeout));
+}
+
 void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
     device_t *flash_dev = &riscv->flash->device;
     if (riscv->pc < flash_dev->base || riscv->pc >= flash_dev->end) { // end is not valid address
@@ -802,6 +936,13 @@ void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
         return;
     }
 
+    HANDLE handle;
+    if (riscv->gdb_server && forever) {
+        gdb_stop = 0;
+        thread_stop = 0;
+        handle = thread_create(handle_gdb_stop_thread, riscv->gdb_server);
+    }
+    
     do {
         if (riscv->pc >= flash_dev->end) {
             goto exception;
@@ -810,13 +951,6 @@ void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
         if (forever) {
             int detect = riscv_detect_breakpoint(riscv, riscv->pc);
             if (detect) {
-                break;
-            }
-
-            // note that recv is a blocking function
-            char ch = EOF;
-            recv(riscv->gdb_server->client, &ch, 1, 0);
-            if (ch == GDB_PAUSE) {
                 break;
             }
         }
@@ -866,12 +1000,24 @@ void riscv_fetch_and_execute(riscv_t *riscv, int forever) {
                 goto exception;
                 break;
         }
-    } while (forever);
-    
-ebreak:
-    return;
 
-exception: // exception happens
+        // is removing the pending after entering the handler a correct way?
+        // no, since another interrupt might come and have higher priority
+        if (riscv->csr_regs.mstatus & (1 << 3)) {
+            int irq = pfic_get_irq_pending(riscv->pfic);
+            if (irq >= 0 && irq != riscv->active_irq) {
+                riscv_enter_irq(riscv, irq, riscv->pc, irq, 0);
+            } 
+        }
+
+    } while (forever && !gdb_stop);
+
+exception: 
+ebreak:
+    if (riscv->gdb_server && forever) {
+        thread_stop = 1;
+        thread_wait(handle);
+    }
     return;
 }
 
@@ -919,14 +1065,6 @@ int riscv_mem_write(riscv_t *riscv, riscv_word_t addr, uint8_t *val, int width) 
 
     riscv->dev_write = device;
     return device->write(device, addr, val, width);
-}
-
-riscv_word_t riscv_read_csr(riscv_t *riscv, riscv_word_t addr) {
-    return riscv->csr_regs.mscratch;
-}
-
-void riscv_write_csr(riscv_t *riscv, riscv_word_t addr, riscv_word_t val) {
-    riscv->csr_regs.mscratch = val;
 }
 
 void riscv_run(riscv_t *riscv) {
@@ -978,4 +1116,31 @@ int riscv_detect_breakpoint(riscv_t *riscv, riscv_word_t addr) {
     }
 
     return 0;
+}
+
+// set the csr regs and pc
+// will enter the interrupt handler the next loop
+void riscv_enter_irq(riscv_t *riscv, int irq, riscv_word_t mepc, riscv_word_t mcause, riscv_word_t mtval) {
+    riscv->csr_regs.mepc = mepc;
+    riscv->csr_regs.mcause = mcause;
+    riscv->csr_regs.mtval = mtval;
+    riscv->csr_regs.mstatus &= ~(1 << 7);
+    riscv->csr_regs.mstatus |= (riscv->csr_regs.mstatus & (1 << 3)) << 4;
+    
+    riscv_word_t base = riscv->csr_regs.mtvec & 0xFFFFFFFC;
+    riscv_word_t handler_saved_addr = base + irq * 4;
+    
+    riscv_mem_read(riscv, handler_saved_addr, (uint8_t*)&riscv->pc, sizeof(riscv_word_t));
+    riscv->active_irq = irq;
+}
+
+// recover regs
+// reset active irq
+// reset pfic regs
+void riscv_exit_irq(riscv_t *riscv) {
+    riscv->pc = riscv->csr_regs.mepc;
+    riscv->csr_regs.mstatus &= ~(1 << 3);
+    riscv->csr_regs.mstatus |= (riscv->csr_regs.mstatus & (1 << 7)) >> 4;
+    pfic_clear_irq_pending(riscv->pfic, riscv->active_irq);
+    riscv->active_irq = 0;
 }
